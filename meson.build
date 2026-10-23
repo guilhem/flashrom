@@ -246,6 +246,13 @@ programmer = {
     'test_srcs' : files('tests/dummyflasher.c'),
     'flags'   : [ '-DCONFIG_DUMMY=1' ],
   },
+  'ezp_xpro' : {
+    'deps'    : [ libusb1 ],
+    'groups'  : [ group_usb, group_external ],
+    'srcs'    : files('programmers/ezp_xpro.c'),
+    'test_srcs' : files('tests/ezp_xpro.c'),
+    'flags'   : [ '-DCONFIG_EZP_XPRO=1' ],
+  },
   'fault'     : {
     'srcs'    : files('programmers/fault.c'),
     'test_srcs' : files('tests/fault.c'),

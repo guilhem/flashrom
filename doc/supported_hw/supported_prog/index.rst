@@ -18,5 +18,6 @@ Patches to add/update documentation are very much appreciated.
     buspirate
     ch341ab
     dummyflasher
+    ezp_xpro
     ft2232_spi
     serprog/index

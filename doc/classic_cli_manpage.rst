@@ -342,6 +342,7 @@ All operations involving any chip access (probe/read/write/...) require the ``-p
         * ``serprog``             (for flash ROMs attached to a programmer speaking serprog, including some Arduino-based devices)
         * ``buspirate_spi``       (for SPI flash ROMs attached to a Bus Pirate)
         * ``dediprog``            (for SPI flash ROMs attached to a Dediprog SF100)
+        * ``ezp_xpro``            (for 3.3 V SPI NOR flash ROMs attached to an EZP XPro)
         * ``raiden_debug_spi``    (For Chrome EC based debug tools - SuzyQable, Servo V4, C2D2 & uServo)
         * ``pony_spi``            (for SPI flash ROMs attached to a SI-Prog serial port bitbanging adapter)
         * ``nicintel_spi``        (for SPI flash ROMs on Intel Gigabit network cards)
@@ -1317,6 +1318,30 @@ Syntax is::
 where ``value`` can be ``60M``, ``30M``, ``15M``, ``7.5M``, ``3.75M``, ``1.875M``, ``937.5K``, ``468.75K``.
 
 
+ezp_xpro programmer
+^^^^^^^^^^^^^^^^^^^
+
+The EZP XPro (USB ID ``0716:5018``) uses libusb 1.0 directly; no proprietary application or
+device-specific kernel driver is required. Initial support targets 3.3 V SPI NOR chips
+of at most 16 MiB; currently only the ``GD25Q80(B)`` profile is accepted.
+Read, erase, write and verification have succeeded on firmware 1.3, which is required for
+erase and write. Only this chip/firmware combination is hardware qualified;
+electrical levels and register/OTP effects remain unverified.
+
+Both ``chip`` (the exact flashrom chip name) and ``voltage=3300`` (millivolts) must be supplied::
+
+        flashrom -p 'ezp_xpro:chip=GD25Q80(B),voltage=3300' -r backup.bin
+
+Select the physical chip with the ``chip`` programmer parameter and omit the global ``-c`` option.
+The opaque master is probed through flashrom's generic opaque chip definition, so
+``-c 'GD25Q80(B)'`` prevents this backend from being probed.
+Measure supply and signal voltages before attaching a chip; the voltage parameter is not a measurement.
+Normal ``--wp-*`` operations are unsupported by this opaque programmer.
+Only whole-chip erase is exposed. A write callback always verifies the complete
+array, including preserved bytes; this does not establish protection-register or OTP behavior.
+See :doc:`/supported_hw/supported_prog/ezp_xpro` for backup, qualification, and usage instructions.
+
+
 digilent_spi programmer
 ^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -1602,7 +1627,7 @@ REQUIREMENTS
 
         * need access to the respective USB device via libusb API version 1.0
 
-* ch341a_spi, dediprog, nv_sma_spi
+* ch341a_spi, dediprog, ezp_xpro, nv_sma_spi
 
         * need access to the respective USB device via libusb API version 1.0
 
@@ -1615,7 +1640,7 @@ REQUIREMENTS
         * have to be run as superuser/root
         * need raw access permission
 
-* serprog, buspirate_spi, dediprog, usbblaster_spi, ft2232_spi, pickit2_spi, ch341a_spi, digilent_spi, dirtyjtag_spi, spidriver
+* serprog, buspirate_spi, dediprog, ezp_xpro, usbblaster_spi, ft2232_spi, pickit2_spi, ch341a_spi, digilent_spi, dirtyjtag_spi, spidriver
 
         * can be run as normal user on most operating systems if appropriate device permissions are set
 
