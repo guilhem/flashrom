@@ -1322,19 +1322,23 @@ ezp_xpro programmer
 ^^^^^^^^^^^^^^^^^^^
 
 The EZP XPro (USB ID ``0716:5018``) uses libusb 1.0 directly; no proprietary application or
-device-specific kernel driver is required. Initial support targets 3.3 V SPI NOR chips
-of at most 16 MiB; currently only the ``GD25Q80(B)`` profile is accepted.
+device-specific kernel driver is required. It supports 3.3 V SPI NOR profiles
+of at most 16 MiB by matching flashrom's chip metadata to recovered firmware
+selectors. Support is shared across chip manufacturers rather than restricted
+to the hardware qualification chip. Unsupported or ambiguous profiles are
+rejected before USB access. The list from ``flashrom -L`` includes chips for
+other programmers too; it is not an EZP compatibility list.
 Read, erase, write and verification have succeeded on firmware 1.3, which is required for
-erase and write. Only this chip/firmware combination is hardware qualified;
+erase and write. The GD25Q80/firmware 1.3 combination is hardware qualified;
 electrical levels and register/OTP effects remain unverified.
 
 Both ``chip`` (the exact flashrom chip name) and ``voltage=3300`` (millivolts) must be supplied::
 
-        flashrom -p 'ezp_xpro:chip=GD25Q80(B),voltage=3300' -r backup.bin
+        flashrom -p 'ezp_xpro:chip=W25Q128.V,voltage=3300' -r backup.bin
 
 Select the physical chip with the ``chip`` programmer parameter and omit the global ``-c`` option.
 The opaque master is probed through flashrom's generic opaque chip definition, so
-``-c 'GD25Q80(B)'`` prevents this backend from being probed.
+``-c 'W25Q128.V'`` prevents this backend from being probed.
 Measure supply and signal voltages before attaching a chip; the voltage parameter is not a measurement.
 Normal ``--wp-*`` operations are unsupported by this opaque programmer.
 Only whole-chip erase is exposed. A write callback always verifies the complete

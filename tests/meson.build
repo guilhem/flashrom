@@ -174,3 +174,8 @@ flashrom_client_tests = executable('flashrom_client_tests',
   dependencies : [cmocka_dep, libflashrom_test_dep],
 )
 test('flashrom client tests', flashrom_client_tests)
+
+if programmer.get('ezp_xpro').get('active')
+  test('EZP XPro profile generator', import('python').find_installation(),
+    args : files('ezp_xpro_profiles.py'))
+endif
