@@ -1323,7 +1323,7 @@ ezp_xpro programmer
 
 The EZP XPro (USB ID ``0716:5018``) uses libusb 1.0 directly; no proprietary application or
 device-specific kernel driver is required. It supports 3.3 V SPI NOR profiles
-of at most 16 MiB by matching flashrom's chip metadata to recovered firmware
+of at most 64 MiB and the M95320/M95M02 EEPROM definitions by matching flashrom's metadata to recovered firmware
 selectors. Support is shared across chip manufacturers rather than restricted
 to the hardware qualification chip. Unsupported or ambiguous profiles are
 rejected before USB access. The list from ``flashrom -L`` includes chips for
@@ -1332,7 +1332,8 @@ Read, erase, write and verification have succeeded on firmware 1.3, which is req
 erase and write. The GD25Q80/firmware 1.3 combination is hardware qualified;
 electrical levels and register/OTP effects remain unverified.
 
-Both ``chip`` (the exact flashrom chip name) and ``voltage=3300`` (millivolts) must be supplied::
+Both ``chip`` (the exact flashrom chip name) and ``voltage`` (millivolts) must be supplied.
+SPI NOR requires ``voltage=3300``::
 
         flashrom -p 'ezp_xpro:chip=W25Q128.V,voltage=3300' -r backup.bin
 
@@ -1341,8 +1342,21 @@ The opaque master is probed through flashrom's generic opaque chip definition, s
 ``-c 'W25Q128.V'`` prevents this backend from being probed.
 Measure supply and signal voltages before attaching a chip; the voltage parameter is not a measurement.
 Normal ``--wp-*`` operations are unsupported by this opaque programmer.
-Only whole-chip erase is exposed. A write callback always verifies the complete
-array, including preserved bytes; this does not establish protection-register or OTP behavior.
+Only whole-chip erase geometry is exposed. Some profiles preserve, erase and
+rewrite the complete image even for a small update. A write callback always
+verifies the complete array, including preserved bytes.
+
+EEPROM profiles require ``--force`` to assume the explicitly selected target::
+
+        flashrom --force -p 'ezp_xpro:chip=M95320,voltage=3300' -r backup.bin
+
+Neither EEPROM has an established identification transaction through this backend.
+``--force`` retains flashrom's other safety overrides; NOR identity mismatches
+remain errors. EEPROM permits ``voltage=3300`` or ``voltage=5000`` within the
+selected chip's range, and EEPROM ``-E`` writes logical zeroes without NOR erase.
+Native 1.8 V operation remains disabled. Large chips and EEPROMs are not hardware
+qualified, and array verification does not establish register, OTP or address-mode
+preservation.
 See :doc:`/supported_hw/supported_prog/ezp_xpro` for backup, qualification, and usage instructions.
 
 
