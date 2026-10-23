@@ -9,6 +9,7 @@
 #include "helpers.h"
 #include "log.h"
 #include "platform/udelay.h"
+#include "ezp_xpro_profiles.h"
 
 #define EZP_COMMAND_EP 0x02
 #define EZP_DATA_EP 0x01
@@ -21,6 +22,7 @@ struct ezp_xpro_data {
 	libusb_context *usb;
 	libusb_device_handle *handle;
 	const struct flashchip *chip;
+	unsigned int block_size;
 	uint8_t packet[EZP_PACKET_SIZE];
 	bool claimed;
 	bool active;
@@ -114,7 +116,10 @@ static int ezp_probe(struct flashctx *flash)
 	flash->chip->total_size = data->chip->total_size;
 	flash->chip->page_size = data->chip->page_size;
 	flash->chip->voltage = data->chip->voltage;
-	flash->chip->tested = data->firmware == 0x03 ? TEST_OK_PREW : TEST_OK_PROBE;
+	flash->chip->tested = TEST_UNTESTED;
+	/* Hardware qualification is separate from firmware profile availability. */
+	if (!strcmp(data->chip->name, "GD25Q80(B)"))
+		flash->chip->tested = data->firmware == 0x03 ? TEST_OK_PREW : TEST_OK_PROBE;
 	flash->chip->tested.wp = NA;
 	/* Batch changed bytes into pages to avoid repeated whole-image verification. */
 	flash->chip->gran = WRITE_GRAN_256BYTES;
@@ -165,21 +170,28 @@ static int ezp_write(struct flashctx *flash, const uint8_t *buf, unsigned int st
 		goto failed;
 	memcpy(actual, expected, size);
 	memcpy(expected + start, buf, len);
-	for (unsigned int offset = start / EZP_BLOCK_SIZE * EZP_BLOCK_SIZE;
-	     offset < start + len; offset += EZP_BLOCK_SIZE) {
-		uint8_t block[EZP_BLOCK_SIZE];
+	for (unsigned int offset = start / data->block_size * data->block_size;
+	     offset < start + len; offset += data->block_size) {
+		uint8_t block[1024];
 		uint8_t handshake;
-		if (ezp_command(data, 0x13, offset) ||
-		    ezp_transfer(data, EZP_READ_EP, block, sizeof(block), 5000) ||
-		    ezp_transfer(data, EZP_READ_EP, &handshake, 1, 50000))
+		if (ezp_command(data, 0x13, offset))
+			goto failed;
+		for (unsigned int pos = 0; pos < data->block_size; pos += sizeof(block)) {
+			if (ezp_transfer(data, EZP_READ_EP, block, sizeof(block), 5000))
+				goto failed;
+			if (memcmp(block, actual + offset + pos, sizeof(block))) {
+				msg_perr("EZP XPro sector contents changed since the initial read.\n");
+				goto failed;
+			}
+		}
+		if (ezp_transfer(data, EZP_READ_EP, &handshake, 1, 50000))
 			goto failed;
 		msg_pdbg("EZP XPro block 0x%x read handshake: 0x%02x\n", offset, handshake);
-		if (memcmp(block, actual + offset, sizeof(block))) {
-			msg_perr("EZP XPro sector contents changed since the initial read.\n");
-			goto failed;
+		for (unsigned int pos = 0; pos < data->block_size; pos += EZP_BLOCK_SIZE) {
+			if (ezp_transfer(data, EZP_DATA_EP, expected + offset + pos, EZP_BLOCK_SIZE, 60000))
+				goto failed;
 		}
-		if (ezp_transfer(data, EZP_DATA_EP, expected + offset, EZP_BLOCK_SIZE, 60000) ||
-		    ezp_command(data, 0x02, offset) ||
+		if (ezp_command(data, 0x02, offset) ||
 		    ezp_transfer(data, EZP_READ_EP, &handshake, 1, 60000))
 			goto failed;
 		msg_pdbg("EZP XPro block 0x%x program handshake: 0x%02x\n", offset, handshake);
@@ -254,6 +266,61 @@ static const struct opaque_master ezp_master = {
 	.shutdown = ezp_shutdown,
 };
 
+static bool ezp_has_eraser(const struct flashchip *chip, unsigned int block_size,
+			 bool whole_chip)
+{
+	for (unsigned int i = 0; i < NUM_ERASEFUNCTIONS; i++) {
+		const struct block_eraser *eraser = &chip->block_erasers[i];
+		if (!eraser->block_erase ||
+		    (whole_chip && eraser->block_erase != SPI_BLOCK_ERASE_C7 &&
+		     eraser->block_erase != SPI_BLOCK_ERASE_60))
+			continue;
+		if (eraser->eraseblocks[0].size == block_size &&
+		    eraser->eraseblocks[0].count == chip->total_size * KiB / block_size &&
+		    !eraser->eraseblocks[1].count)
+			return true;
+	}
+	return false;
+}
+
+static const struct ezp_xpro_profile *ezp_profile(const struct flashchip *chip)
+{
+	if (chip->bustype != BUS_SPI || chip->spi_cmd_set != SPI25 ||
+	    chip->probe != PROBE_SPI_RDID || chip->read != SPI_CHIP_READ ||
+	    chip->write != SPI_CHIP_WRITE256 || chip->manufacture_id > 0xff ||
+	    chip->model_id > 0xffff || !chip->total_size || chip->total_size > 16 * 1024 ||
+	    chip->voltage.min > 3300 || chip->voltage.max < 3300 ||
+	    !chip->page_size || (chip->page_size & (chip->page_size - 1)) ||
+	    (chip->feature_bits & (FEATURE_NO_ERASE | FEATURE_ERASED_ZERO | FEATURE_STATUS_PER_DIE |
+			   FEATURE_ADDR_2BYTE)))
+		return NULL;
+	const struct ezp_xpro_profile *profile = NULL;
+	uint32_t jedec = (chip->manufacture_id << 16) | chip->model_id;
+	for (unsigned int i = 0; i < ARRAY_SIZE(ezp_xpro_profiles); i++) {
+		const struct ezp_xpro_profile *candidate = &ezp_xpro_profiles[i];
+		if (candidate->jedec != jedec || candidate->size != chip->total_size * KiB ||
+		    candidate->page_size != chip->page_size)
+			continue;
+		/* Compare every candidate before rejecting unsupported algorithms or geometry. */
+		if (profile && (profile->block_size != candidate->block_size ||
+				profile->selector != candidate->selector || profile->subtype != candidate->subtype)) {
+			msg_perr("Ambiguous EZP XPro firmware profiles for %s.\n", chip->name);
+			return NULL;
+		}
+		if (!profile || !candidate->alternate)
+			profile = candidate;
+	}
+	if (!profile || profile->alternate || profile->selector != 0x324 ||
+	    (profile->subtype != 0 && profile->subtype != 0x10 && profile->subtype != 0x50) ||
+	    profile->block_size < EZP_BLOCK_SIZE || profile->block_size > 256 * KiB ||
+	    (profile->block_size & (profile->block_size - 1)) ||
+	    chip->total_size * KiB % profile->block_size ||
+	    !ezp_has_eraser(chip, profile->block_size, false) ||
+	    !ezp_has_eraser(chip, chip->total_size * KiB, true))
+		return NULL;
+	return profile;
+}
+
 static int ezp_init(const struct programmer_cfg *cfg)
 {
 	char *chip_name = extract_programmer_param_str(cfg, "chip");
@@ -273,10 +340,8 @@ static int ezp_init(const struct programmer_cfg *cfg)
 			chip = &flashchips[i];
 		}
 	}
-	/* Firmware selectors are qualified individually; the chip database stays in flashrom. */
-	if (!chip || strcmp(chip_name, "GD25Q80(B)") || chip->bustype != BUS_SPI ||
-	    chip->voltage.min > 3300 || chip->voltage.max < 3300 ||
-	    chip->total_size > 16 * 1024 || chip->page_size != 256) {
+	const struct ezp_xpro_profile *profile = chip ? ezp_profile(chip) : NULL;
+	if (!profile) {
 		msg_perr("Unsupported EZP XPro chip profile: %s.\n", chip_name);
 		goto invalid;
 	}
@@ -286,13 +351,16 @@ static int ezp_init(const struct programmer_cfg *cfg)
 	if (!data)
 		return 1;
 	data->chip = chip;
+	data->block_size = profile->block_size;
 	data->packet[0] = 0xa5;
-	data->packet[4] = 8;
-	data->packet[5] = 2;
+	data->packet[3] = profile->subtype;
+	for (unsigned int size = chip->page_size; size > 1; size >>= 1)
+		data->packet[4]++;
+	for (unsigned int size = data->block_size / KiB; size > 1; size >>= 1)
+		data->packet[5]++;
 	ezp_put_be32(data->packet + 6, chip->total_size * KiB);
-	/* GD25Q80's vendor profile uses selector 324 and the 3 V voltage selector. */
-	data->packet[11] = 0x03;
-	data->packet[12] = 0x24;
+	data->packet[11] = profile->selector >> 8;
+	data->packet[12] = profile->selector;
 	data->packet[19] = 0x5a;
 	if (libusb_init(&data->usb) < 0) {
 		free(data);

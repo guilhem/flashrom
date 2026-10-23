@@ -34,6 +34,11 @@ void *not_null(void);
 
 /* ezp_xpro.c */
 void ezp_xpro_invalid_params_test(void **state);
+void ezp_xpro_profile_guards_test(void **state);
+void ezp_xpro_profile_inventory_test(void **state);
+void ezp_xpro_profile_status_test(void **state);
+void ezp_xpro_profile_write_ranges_test(void **state);
+void ezp_xpro_profile_transfer_error_test(void **state);
 void ezp_xpro_ambiguous_params_test(void **state);
 void ezp_xpro_basic_lifecycle_test_success(void **state);
 void ezp_xpro_master_registration_failure_test(void **state);
