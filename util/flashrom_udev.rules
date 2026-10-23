@@ -32,6 +32,9 @@ ATTRS{idVendor}=="0483", ATTRS{idProduct}=="dada", MODE="664", GROUP="plugdev"
 # http://www.dlpdesign.com/usb/usb1232h.shtml
 ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6010", MODE="664", GROUP="plugdev"
 
+# EZP XPro
+ATTRS{idVendor}=="0716", ATTRS{idProduct}=="5018", MODE="664", GROUP="plugdev"
+
 # FIC OpenMoko Neo1973 Debug board (V2+)
 # http://wiki.openmoko.org/wiki/Neo1973_Debug_Board_v2
 ATTRS{idVendor}=="1457", ATTRS{idProduct}=="5118", MODE="664", GROUP="plugdev"

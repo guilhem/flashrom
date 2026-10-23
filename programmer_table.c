@@ -14,6 +14,10 @@ const struct programmer_entry *const programmer_table[] = {
     &programmer_dummy,
 #endif
 
+#if CONFIG_EZP_XPRO == 1
+    &programmer_ezp_xpro,
+#endif
+
 #if CONFIG_FAULT == 1
     &programmer_fault,
 #endif

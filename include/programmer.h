@@ -56,6 +56,7 @@ extern const struct programmer_entry programmer_ch347_spi;
 extern const struct programmer_entry programmer_dediprog;
 extern const struct programmer_entry programmer_digilent_spi;
 extern const struct programmer_entry programmer_dummy;
+extern const struct programmer_entry programmer_ezp_xpro;
 extern const struct programmer_entry programmer_fault;
 extern const struct programmer_entry programmer_ft2232_spi;
 extern const struct programmer_entry programmer_internal;
