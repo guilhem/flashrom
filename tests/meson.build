@@ -148,7 +148,8 @@ flashrom_tests = executable('flashrom_unit_tests',
   link_args : mocks + link_args,
   dependencies : [cmocka_dep, flashrom_test_dep, threads_dep],
 )
-test('cmocka test flashrom', flashrom_tests)
+# Complete 32/64 MiB readback and fault-injection cases exceed the default 30 seconds on slower hosts.
+test('cmocka test flashrom', flashrom_tests, timeout : 120)
 
 if get_option('llvm_cov').enabled()
   run_target('llvm-cov-tests', command : ['../scripts/llvm-cov', flashrom_tests])

@@ -1277,6 +1277,8 @@ int main(int argc, char *argv[])
 	msg_pdbg("The following protocols are supported: %s.\n", tempstr ? tempstr : "?");
 	free(tempstr);
 
+	/* Opaque programmers may require an explicit target assumption during probing. */
+	flashrom_flag_set(context, FLASHROM_FLAG_FORCE, options.force);
 	all_matched_count = flashrom_flash_probe_v2(context, &all_matched_names,
                                 NULL, options.chip_to_probe);
 	if (all_matched_count == -1) {

@@ -4,6 +4,7 @@
 
 import argparse
 import hashlib
+import json
 from pathlib import Path
 import re
 import sys
@@ -16,53 +17,66 @@ def parse_profiles(decoded):
     lines = decoded.splitlines()
     if not lines or lines[0] != "$25 SPI FLASH":
         raise ValueError("expected initial $25 SPI FLASH section")
-    try:
-        end = lines.index("$24 EEPROM")
-    except ValueError:
-        raise ValueError("missing $24 EEPROM boundary") from None
+    if "$24 EEPROM" not in lines:
+        raise ValueError("missing $24 EEPROM boundary")
 
     records = []
-    for number, line in enumerate(lines[1:end], 2):
+    family = 0
+    spi_rows = 0
+    for number, line in enumerate(lines[1:], 2):
+        if line.startswith("$"):
+            family = 2 if line == "$95 EEPROM" else None
+            continue
+        if family is None:
+            continue
         if re.fullmatch(r"#[^:]+:", line):
             continue
         try:
             if not line.startswith("@"):
-                raise ValueError("expected a SPI profile row or manufacturer heading")
+                raise ValueError("expected a profile row or manufacturer heading")
             fields = line[1:].split(":")
             if len(fields) != 10 or not fields[0]:
                 raise ValueError("expected a name and nine profile fields")
-            _, page, block, size, auxiliary, selector, primary, alternate, voltage, kind = fields
+            name, page, block, size, auxiliary, selector, primary, alternate, voltage, kind = fields
+            if any(not 32 <= ord(char) <= 126 for char in name):
+                raise ValueError("profile name must contain only printable ASCII characters")
             if auxiliary != "N":
                 raise ValueError(f"unsupported auxiliary field {auxiliary!r}")
-            if voltage != "3":
-                raise ValueError(f"unsupported voltage {voltage!r}; only 3 is represented")
+            expected_voltage = "3" if family == 0 else "5"
+            if voltage != expected_voltage:
+                raise ValueError(f"unsupported voltage {voltage!r}; expected {expected_voltage}")
             for value, pattern in (
-                (page, r"N|[1-9][0-9]*"),
-                (block, r"F|N|[1-9][0-9]*KB"),
-                (size, r"[1-9][0-9]*(?:KB|MB)"),
+                (page, r"N|[1-9][0-9]*" if family == 0 else r"[1-9][0-9]*"),
+                (block, r"F|N|[1-9][0-9]*KB" if family == 0 else r"N"),
+                (size, r"[1-9][0-9]*(?:B|KB|MB)"),
                 (selector, r"[0-9A-F]{3}"),
-                (primary, r"[0-9A-F]{6}"),
-                (alternate, r"N|[0-9A-F]{6}"),
-                (kind, r"0[0-9A-F]{2}"),
+                (primary, r"[0-9A-F]{6}" if family == 0 else r"N"),
+                (alternate, r"N|[0-9A-F]{6}" if family == 0 else r"N"),
+                (kind, r"0[0-9A-F]{2}" if family == 0 else r"200"),
             ):
                 if not re.fullmatch(pattern, value):
                     raise ValueError(f"unsupported profile field {value!r} (expected {pattern})")
 
-            size_bytes = int(size[:-2]) * (1024 if size.endswith("KB") else 1024 * 1024)
+            size_value, size_unit = re.fullmatch(r"([0-9]+)(B|KB|MB)", size).groups()
+            size_bytes = int(size_value) * {"B": 1, "KB": 1024, "MB": 1024 * 1024}[size_unit]
             page_bytes = 0 if page == "N" else int(page)
             block_bytes = 0 if block in ("F", "N") else int(block[:-2]) * 1024
             if max(size_bytes, page_bytes, block_bytes) > 0xFFFFFFFF:
                 raise ValueError("profile geometry exceeds 32-bit unsigned storage")
-            for identity, is_alternate in ((primary, False), (alternate, True)):
-                if identity != "N":
-                    records.append((int(identity, 16), size_bytes, page_bytes, block_bytes,
-                                    int(selector, 16), int(kind[1:], 16), is_alternate))
+            for identity, peer, is_alternate in ((primary, alternate, False), (alternate, primary, True)):
+                if identity == "N" and is_alternate:
+                    continue
+                records.append((0 if identity == "N" else int(identity, 16),
+                                size_bytes, page_bytes, block_bytes, int(selector, 16),
+                                int(kind[1:], 16), is_alternate,
+                                0 if peer == "N" else int(peer, 16), int(kind[0], 16), name))
+            spi_rows += family == 0
         except ValueError as error:
             raise ValueError(f"line {number}: {error}") from None
 
-    if not records:
+    if not spi_rows:
         raise ValueError("empty SPI FLASH section")
-    # Keep every conflicting geometry/selector/subtype, including alternate identities.
+    # Deduplicate only complete records, retaining names, links and conflicting algorithms.
     return sorted(set(records))
 
 
@@ -93,13 +107,19 @@ def generate_header(source):
         "\tuint16_t selector;",
         "\tuint8_t subtype;",
         "\tbool alternate;",
+        "\tuint32_t peer_jedec;",
+        "\tuint8_t family;",
+        "\tconst char *name;",
         "};",
         "",
         "static const struct ezp_xpro_profile ezp_xpro_profiles[] = {",
     ]
-    for jedec, size, page, block, selector, subtype, alternate in records:
+    for jedec, size, page, block, selector, subtype, alternate, peer, family, name in records:
+        # C trigraphs must not turn source names into backslash escapes.
+        c_name = json.dumps(name, ensure_ascii=True).replace("?", r"\?")
         lines.append(f"\t{{0x{jedec:06x}, {size}, {page}, {block}, 0x{selector:03x}, "
-                     f"0x{subtype:02x}, {'true' if alternate else 'false'}}},")
+                     f"0x{subtype:02x}, {'true' if alternate else 'false'}, "
+                     f"0x{peer:06x}, 0x{family:02x}, {c_name}}},")
     lines.extend(("};", "", "#endif /* EZP_XPRO_PROFILES_H */", ""))
     return "\n".join(lines)
 

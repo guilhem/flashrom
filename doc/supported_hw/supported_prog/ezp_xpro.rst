@@ -2,12 +2,13 @@ EZP XPro
 ========
 
 The ``ezp_xpro`` backend connects flashrom to an EZP XPro USB programmer
-(USB ID ``0716:5018``) for SPI NOR programming. It uses libusb 1.0 directly,
+(USB ID ``0716:5018``) for SPI NOR and supported SPI EEPROM programming. It uses libusb 1.0 directly,
 without the proprietary application or a device-specific kernel driver. The
 backend selects SPI NOR profiles from flashrom's chip database and matches them
 to the firmware selectors recovered from the manufacturer's application. It
-accepts compatible 3.3 V profiles of at most 16 MiB across manufacturers; chip
-support is not restricted to the model used for hardware qualification.
+accepts compatible 3.3 V SPI NOR profiles up to 64 MiB, including supported
+legacy algorithms, and the M95320/M95M02 EEPROM definitions from flashrom.
+Support follows exact firmware mappings across manufacturers.
 
 .. warning::
 
@@ -51,15 +52,17 @@ Before connecting a chip
   with a socketed sacrificial chip, isolated from a powered target board.
 * Measure VCC and the SPI signal levels at the adapter before attaching the
   chip, and check VCC under load during qualification. Both supply and logic
-  levels must be compatible with the chip's 3.3 V specification.
+  levels must be compatible with the selected chip's specification.
 * ``voltage=3300`` is an explicit voltage request in millivolts, not evidence
-  that the adapter supplies safe levels. Do not connect a 1.8 V or 5 V chip.
+  that the adapter supplies safe levels. SPI NOR profiles require 3300 mV.
+  The supported EEPROM profiles also accept 5000 mV within their datasheet
+  range. Native 1.8 V operation is not enabled.
 
 Read and preserve a backup
 --------------------------
 
 Both programmer parameters are required: ``chip`` is the exact flashrom chip
-name, and ``voltage`` must be ``3300``. Find the chip name with ``flashrom -L``
+name, and ``voltage`` must be ``3300`` for SPI NOR. Find the chip name with ``flashrom -L``
 and select it according to its marking and datasheet. That list covers all
 flashrom programmers; the EZP backend rejects profiles it cannot translate.
 For example, a 3.3 V Winbond W25Q128 uses ``W25Q128.V`` and has a capacity of
@@ -85,8 +88,8 @@ option: selecting the physical chip there filters out the generic opaque chip
 definition before this backend can probe it. An accepted chip name alone does not qualify that
 chip and adapter combination.
 
-Erase, write, and verify
-------------------------
+SPI NOR erase, write, and verify
+--------------------------------
 
 Erase and write require firmware 1.3. The following commands
 describe the destructive qualification workflow using a sacrificial chip.
@@ -110,46 +113,84 @@ restore and check the original contents::
     flashrom -p "$programmer" -w backup.bin
     flashrom -p "$programmer" -v backup.bin
 
+SPI EEPROM: explicit selection and logical erase
+------------------------------------------------
+
+The supported EEPROM definitions are ``M95320`` (4096 bytes, 32-byte pages)
+and ``M95M02`` (262144 bytes, 256-byte pages). Select the exact chip and either
+``voltage=3300`` or ``voltage=5000``, as appropriate for its datasheet and wiring.
+The driver rejects a voltage outside flashrom's declared range.
+
+EEPROM probing requires ``--force``. M95320 has no electronic identification;
+M95M02 has a signature, but reading it through the recovered EZP interface is
+not established. The backend reports an assumed target and sends no NOR ID
+query. This cannot detect a missing or incorrectly selected chip. Global
+``--force`` also retains flashrom's other safety-check overrides; it is not
+limited to target assumption. NOR identity mismatches and backend transfer
+failures still cannot be overridden.
+
+For an actual M95320, for example::
+
+    programmer='ezp_xpro:chip=M95320,voltage=3300'
+    flashrom --force -p "$programmer" -r eeprom-backup.bin
+    flashrom --force -p "$programmer" -r eeprom-backup-second.bin
+    cmp eeprom-backup.bin eeprom-backup-second.bin
+    flashrom --force -p "$programmer" -w eeprom-image.bin
+    flashrom --force -p "$programmer" -v eeprom-image.bin
+
+Use a capacity-sized image and preserve the backup. Writes can change bits in
+both directions without sending NOR chip erase. EEPROM ``-E`` implements
+flashrom's logical erase convention by writing zeroes, rather than issuing a
+physical erase command. Every write, including logical erase, preserves bytes
+outside its range and verifies the complete array. Neither EEPROM has been
+qualified on EZP hardware.
+
 Limits and qualification evidence
 ---------------------------------
 
-* Profile eligibility uses flashrom's JEDEC identity, capacity, page size,
-  voltage limits and uniform erase geometry. A generated table contains the
-  additional firmware selectors from the manufacturer's v2.8 database. Profiles
-  must match unambiguously, use ordinary three-byte RDID and page programming,
-  and have a supported block replacement size (4, 32, 64 or 256 KiB). Both the
-  firmware profile and flashrom's geometry must agree.
-* Examples include GigaDevice GD25Q64(B), Winbond W25Q128.V, Macronix
-  MX25L5121E, and Micron/Numonyx/ST M25P128. These examples describe accepted
-  profiles, not additional hardware qualification. New aliases in flashrom
-  with matching identity and geometry reuse the same firmware mapping.
-* EEPROM, DataFlash, NAND, parallel/LPC/FWH buses, other voltages, extended
-  identification and addresses beyond 24 bits are unsupported. A chip in
-  ``flashrom -L`` is not necessarily usable with this programmer. Profiles
-  absent from the recovered firmware mapping, ambiguous variants, and firmware
-  algorithms without a supported transfer path are rejected before USB access.
-  In particular, the shared JEDEC IDs of S25FL032A/P and S25FL064A/P do not
-  distinguish the conflicting vendor profiles.
+* flashrom remains authoritative for chip identity, capacity, physical page
+  size, voltage limits and erase geometry. The generated vendor mapping adds
+  algorithm selectors, algorithm-unit sizes, names and exact primary/alternate
+  wire identities. For some legacy chips these differ from the ordinary
+  JEDEC representation. An exact named vendor row can resolve the selected
+  algorithm; otherwise incompatible matching profiles are rejected.
+* Supported NOR mappings include ordinary page programming, the established
+  SST byte/AAI, ESMT and Atmel algorithms, and compatible PMC/AMIC identification
+  encodings. Missing mappings, unresolved variants, unknown voltages, DataFlash,
+  NAND and parallel/LPC/FWH buses remain unsupported. ``flashrom -L`` covers
+  other programmers too; it is not an EZP compatibility list.
+* The exact ``4B7`` mappings permit 32/64 MiB chips with compatible flashrom
+  addressing metadata. They are distinct from the unsupported ``400`` family.
+  These paths are tested with mocked USB, not large physical chips. Physical
+  qualification must use nonuniform contents that differ between the 0, 16,
+  32 MiB and final regions; repeated or all-FF reads cannot rule out address
+  aliasing. Target address-mode restoration for the next consumer is unproven.
+* Native 1.8 V operation remains disabled. The Windows host has a socket-mode
+  detector for an alternate socket, which the vendor manual identifies as
+  the copy-source/master position. This does not establish native 1.8 V
+  selection or safe supply/signal levels for a low-voltage chip.
+* Firmware block replacement uses the mapped block size (4, 32, 64 or 256 KiB
+  for NOR; a page for these EEPROMs). For a compatible NOR profile marked ``F``,
+  the driver instead preserves the whole image, erases if the chip is nonblank,
+  and programs the complete array. Even a small update can therefore erase and
+  rewrite all contents. Loss of power can lose the whole array; keep the backup.
+* Only whole-chip erase geometry is advertised. Where the NOR metadata has a
+  compatible chip-erase command, erase uses firmware ``05``; otherwise an
+  established block-replacement profile fills the array with FF and verifies
+  it. The core may erase the complete chip during a partial-layout update and
+  rewrite excluded contents. No physical whole-chip erase substitutes for a
+  smaller erase callback request.
 * Eligibility does not mark a chip as tested. Only the documented GD25Q80 and
-  firmware 1.3 combination has completed hardware qualification; other profiles
-  retain flashrom's untested read/erase/write status.
-* Normal flashrom ``--wp-status``, ``--wp-list``, ``--wp-enable``,
-  ``--wp-disable``, ``--wp-range``, and ``--wp-region`` operations are unsupported
-  through this opaque backend. Do not assume existing protection settings can
-  be inspected or preserved; keep initial destructive tests to sacrificial chips.
-* The erase callback accepts only a whole-chip range. The core may erase the
-  complete chip when updating an existing image, including a partial layout;
-  flashrom preserves the excluded contents by rewriting them. This backend
-  does not expose a sector-only erase operation.
-* Programming uses firmware block replacement while preserving the other bytes
-  from an initial complete read. Each write callback performs a fresh complete
-  readback comparison, even if normal CLI verification was disabled. This
-  checks array contents and does not establish register or OTP behavior.
-* A failed transfer or comparison prevents further operations in that programmer
-  session. Preserve logs and backups, disconnect and reconnect the programmer,
-  and investigate the failure before retrying a write.
-* USB enumeration, a recognized chip, unit tests, and repeated reads alone do
-  not prove erase/write reliability or electrical safety.
+  firmware 1.3 combination has completed hardware qualification. Other NOR and
+  EEPROM read/erase/write paths remain untested on hardware.
+* Normal ``--wp-*`` operations remain unavailable. Do not assume protection,
+  QE, configuration or OTP settings can be inspected or preserved. Complete
+  array verification establishes only array contents.
+* Every write callback performs a fresh complete-array comparison, including
+  excluded bytes, even if normal CLI verification was disabled. A failed
+  transfer, completion or comparison blocks subsequent operations in that
+  programmer session. Preserve the backup and logs before reconnecting and
+  investigating a failure.
 
 Linux hardware qualification on 23 October 2026 used USB ``0716:5018``,
 ``bcdDevice=0200``, firmware 1.3, and a GD25Q80 reporting JEDEC ``C8 40 14``.
@@ -166,7 +207,14 @@ A fresh complete read matched the expected image, including every preserved
 byte. Restoring the backup exercised whole-chip erase, and another fresh read
 matched the original contents exactly.
 
-The nonuniform pattern and readback SHA-256 was
+Further qualification exercised the whole-array ``01``/``02`` programming path
+while retaining the exact GD25Q80 wire profile. A nonuniform 1 MiB image and
+complete readback matched. Logical erase through ``13`` block replacement,
+without ``05``, restored the original all-FF array, confirmed by a fresh normal
+CLI process. This qualifies those paths on GD25Q80, not other F profiles,
+large chips or EEPROMs.
+
+The initial nonuniform pattern and readback SHA-256 was
 ``e923d47bb0bbb9171b7bd92ade6012cb0ff9e95a4732a3370c9ef141654ba5f1``.
 These comparisons used this backend, not an independent programmer. Socket and
 signal voltages, register/OTP contents, other chips, and other firmware versions
@@ -193,7 +241,7 @@ big-endian argument. The GD25Q80 row is identical in both application versions::
     @GD25Q80:256:4KB:1MB:N:324:C84014:N:3:000
     A5 00 00 00 08 02 00 10 00 00 00 03 24 00 00 00 00 00 00 5A
 
-The driver uses configuration ``00``, firmware query ``12``, JEDEC query
+The driver uses configuration ``00``, firmware query ``12``, chip-ID query
 ``07``, whole-array read ``0D``, whole-chip erase ``05`` and stop ``09``.
 Erase waits for byte ``06`` and then independently checks every array byte.
 Block replacement ``13`` takes an aligned sector address, returns the existing
@@ -205,15 +253,26 @@ implementation has not been recovered.
 
 The generated ``programmers/ezp_xpro_profiles.h`` stores only the extra firmware
 profile information and the identity/geometry keys needed to disambiguate it.
-It does not replace flashrom's chip definitions. To regenerate it from a decoded
+Names disambiguate explicit selections, and linked IDs preserve each original
+primary/alternate pair. Family 2 retains EEPROM rows without inventing IDs.
+The mapping does not replace flashrom's chip definitions. To regenerate it from a decoded
 manufacturer v2.8 database, without running the proprietary application::
 
     python3 util/ezp_xpro_profiles.py /path/to/database.decoded.txt --output programmers/ezp_xpro_profiles.h
 
 Keep conflicting entries, including unsupported algorithms and ``F`` block
-sizes: filtering them out during generation could make an ambiguous JEDEC ID
+sizes: filtering them out during generation could make an ambiguous identity
 appear safe. No vendor database or Python generator is needed at build or run
 time. The read-modify-write path receives blocks in at most 1024-byte transfers
 and sends replacement data in at most 4096-byte transfers, following the
 Windows host's transfer limits. The firmware's internal erase opcode is not
 inferred from its subtype.
+
+Whole-image programming sends ``01`` (5000 ms command timeout), waits 50 ms,
+streams the entire image in at most 4096-byte OUT01 transfers, waits 30 ms,
+and sends ``02`` with the BE32 transmitted byte count. Success requires byte
+``02`` within ten 6000 ms reads, followed by stop ``09`` and complete readback.
+This count has a different meaning from the retained block address in the
+``13`` replacement path. SPI image data is not padded past the intended length.
+EEPROM secondary field ``N`` encodes byte 5 as zero and uses one algorithm page
+as the replacement unit; each transfer is bounded by the remaining page bytes.
