@@ -353,6 +353,8 @@ int wbsio_check_for_spi(struct board_cfg *);
 
 /* opaque.c */
 struct opaque_master {
+	/* Coalesce changed bytes into one synchronous write per prepared region. */
+	bool coalesce_write;
 	int max_data_read;
 	int max_data_write;
 	/* Specific functions for this master */

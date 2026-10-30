@@ -44,6 +44,7 @@ void ezp_xpro_array_write_test(void **state);
 void ezp_xpro_array_completion_test(void **state);
 void ezp_xpro_array_transfer_error_test(void **state);
 void ezp_xpro_array_public_api_test(void **state);
+void ezp_xpro_sparse_image_test(void **state);
 void ezp_xpro_eeprom_policy_test(void **state);
 void ezp_xpro_eeprom_ranges_test(void **state);
 void ezp_xpro_eeprom_transfer_error_test(void **state);

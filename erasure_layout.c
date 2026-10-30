@@ -6,6 +6,7 @@
 #include "erasure_layout.h"
 
 #include "flash.h"
+#include "programmer.h"
 #include "layout.h"
 #include "helpers.h"
 #include "platform/string.h"
@@ -316,7 +317,9 @@ static int erase_write_helper(struct flashctx *const flashctx, chipoff_t region_
 	while ((len_here = get_next_write(curcontents + region_start + start_here,
 					newcontents + region_start + start_here,
 					erase_len - start_here, &start_here,
-					flashctx->chip->gran))) {
+					flashctx->chip->gran,
+					flashctx->mst && (flashctx->mst->buses_supported & BUS_PROG) &&
+					flashctx->mst->opaque.coalesce_write))) {
 		// execute write
 		int ret = write_flash(flashctx,
 				newcontents + region_start + start_here,

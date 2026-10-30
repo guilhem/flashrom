@@ -1341,6 +1341,49 @@ void ezp_xpro_array_transfer_error_test(void **state)
 	}
 }
 
+void ezp_xpro_sparse_image_test(void **state)
+{
+	(void)state;
+	const struct ezp_example *examples[] = {
+		&ezp_array_examples[0], &ezp_eeprom_examples[0], &ezp_eeprom_examples[1],
+	};
+	for (size_t i = 0; i < ARRAY_SIZE(examples); i++) {
+		struct ezp_memory s = ezp_memory_new_example(examples[i]);
+		memset(s.contents, i ? 0 : 0xff, s.example->size);
+		const struct io_mock io = ezp_memory_io(&s);
+		io_mock_register(&io);
+		struct flashctx *flash = NULL;
+		const char **names = NULL;
+		char params[128];
+		snprintf(params, sizeof(params), "chip=%s,voltage=3300", s.example->name);
+		assert_int_equal(programmer_init(&programmer_ezp_xpro, params), 0);
+		assert_int_equal(flashrom_create_context(&flash), 0);
+		flashrom_flag_set(flash, FLASHROM_FLAG_FORCE, i != 0);
+		assert_int_equal(flashrom_flash_probe_v2(flash, &names, NULL, NULL), 1);
+		flashrom_data_free(names);
+		flashrom_flag_set(flash, FLASHROM_FLAG_VERIFY_AFTER_WRITE, true);
+		flashrom_flag_set(flash, FLASHROM_FLAG_VERIFY_WHOLE_CHIP, true);
+		uint8_t *image = malloc(s.example->size);
+		assert_non_null(image);
+		memcpy(image, s.contents, s.example->size);
+		for (unsigned int pos = 0; pos < 3 * s.example->page; pos += 2)
+			image[pos] = 0x5a;
+		image[s.example->size - 1] = 0x5a;
+		assert_int_equal(flashrom_image_write(flash, image, s.example->size, NULL), 0);
+		assert_memory_equal(s.contents, image, s.example->size);
+		assert_int_equal(s.programs, i ? 4 : 1);
+		assert_int_equal(s.array_starts, i ? 0 : 1);
+		assert_int_equal(s.erases, 0);
+		assert_int_equal(s.streams, 4);
+		unsigned int programs = s.programs;
+		assert_int_equal(flashrom_image_write(flash, image, s.example->size, NULL), 0);
+		assert_int_equal(s.programs, programs);
+		free(image);
+		flashrom_flash_release(flash);
+		ezp_memory_finish(&s);
+	}
+}
+
 void ezp_xpro_array_public_api_test(void **state)
 {
 	(void)state;
@@ -2056,7 +2099,7 @@ void ezp_xpro_image_write_verify_erase_test(void **state)
 	flashrom_flag_set(flash, FLASHROM_FLAG_VERIFY_WHOLE_CHIP, true);
 	assert_int_equal(flashrom_image_write(flash, image, EZP_CHIP_SIZE, NULL), 0);
 	assert_memory_equal(s.contents, image, EZP_CHIP_SIZE);
-	assert_int_equal(s.programs, 4);
+	assert_int_equal(s.programs, 3);
 	assert_int_equal(s.erases, 0);
 	assert_int_equal(flashrom_image_verify(flash, image, EZP_CHIP_SIZE), 0);
 	s.contents[EZP_CHIP_SIZE - 1] ^= 1;
@@ -2291,6 +2334,7 @@ SKIP_TEST(ezp_xpro_array_write_test)
 SKIP_TEST(ezp_xpro_array_completion_test)
 SKIP_TEST(ezp_xpro_array_transfer_error_test)
 SKIP_TEST(ezp_xpro_array_public_api_test)
+SKIP_TEST(ezp_xpro_sparse_image_test)
 SKIP_TEST(ezp_xpro_eeprom_policy_test)
 SKIP_TEST(ezp_xpro_eeprom_ranges_test)
 SKIP_TEST(ezp_xpro_eeprom_transfer_error_test)

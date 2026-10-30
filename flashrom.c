@@ -826,6 +826,7 @@ int need_erase(const uint8_t *have, const uint8_t *want, unsigned int len,
  * @want	buffer with desired content
  * @len		length of the checked area
  * @gran	write granularity (enum, not count)
+ * @coalesce	write the entire prepared region if any byte differs
  * @first_start	offset of the first byte which needs to be written (passed in
  *		value is increased by the offset of the first needed write
  *		relative to have/want or unchanged if no write is needed)
@@ -838,7 +839,7 @@ int need_erase(const uint8_t *have, const uint8_t *want, unsigned int len,
  */
 unsigned int get_next_write(const uint8_t *have, const uint8_t *want, unsigned int len,
 			  unsigned int *first_start,
-			  enum write_granularity gran)
+			  enum write_granularity gran, bool coalesce)
 {
 	bool need_write = false;
 	unsigned int rel_start = 0, first_len = 0;
@@ -879,6 +880,9 @@ unsigned int get_next_write(const uint8_t *have, const uint8_t *want, unsigned i
 		 */
 		return 0;
 	}
+	if (coalesce)
+		return memcmp(have, want, len) ? len : 0;
+
 	for (i = 0; i < len / stride; i++) {
 		limit = min(stride, len - i * stride);
 		/* Are 'have' and 'want' identical? */
@@ -1417,7 +1421,9 @@ static void setup_progress_from_layout_and_diff(struct flashctx *flashctx,
 			unsigned int start = region->start;
 			unsigned int len;
 			while ((len = get_next_write(have + start, want + start,
-						     region->end + 1 - start, &start, flashctx->chip->gran))) {
+						     region->end + 1 - start, &start, flashctx->chip->gran,
+						     flashctx->mst && (flashctx->mst->buses_supported & BUS_PROG) &&
+						     flashctx->mst->opaque.coalesce_write))) {
 				start += len;
 				total += len;
 			}

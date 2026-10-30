@@ -88,6 +88,31 @@ option: selecting the physical chip there filters out the generic opaque chip
 definition before this backend can probe it. An accepted chip name alone does not qualify that
 chip and adapter combination.
 
+Use libflashrom in another application
+-------------------------------------
+
+Build libflashrom with ``ezp_xpro`` enabled and use its public API. Pass
+``"ezp_xpro"`` as the programmer name and, for example,
+``"chip=W25Q128.V,voltage=3300"`` as the parameter string to
+``flashrom_programmer_init()``. Keep chip selection in that parameter string;
+pass ``NULL`` as the chip-name filter to ``flashrom_flash_probe_v2()`` so the
+opaque chip can be probed. Check every initialization and probe result before
+reading or modifying memory.
+
+For EEPROM, create the flash context with ``flashrom_create_context()`` and set
+``FLASHROM_FLAG_FORCE`` on it before probing, accepting the target-assumption
+limitations described below. Reuse ``flashrom_image_read()``,
+``flashrom_image_write()`` and ``flashrom_image_verify()`` for image operations.
+Release probe-name arrays, the flash context and the programmer using the
+corresponding public cleanup functions. No separate EZP library is required.
+
+The backend coalesces changes within each prepared writable region. Full-array
+profiles program the array once per such region; replacement profiles program
+only blocks or pages whose contents differ. Whole-array verification remains
+mandatory. Separate included layout regions can still require separate
+transactions. This API programs supported memories; it does not expose SWD,
+JTAG or PIC ICSP for microcontroller programming.
+
 SPI NOR erase, write, and verify
 --------------------------------
 

@@ -696,7 +696,7 @@ unsigned int count_usable_erasers(const struct flashctx *flash);
 int need_erase(const uint8_t *have, const uint8_t *want, unsigned int len, enum write_granularity gran, const uint8_t erased_value);
 erasefunc_t *lookup_erase_func_ptr(const struct block_eraser *const eraser);
 int check_erased_range(struct flashctx *flash, unsigned int start, unsigned int len);
-unsigned int get_next_write(const uint8_t *have, const uint8_t *want, unsigned int len, unsigned int *first_start, enum write_granularity gran);
+unsigned int get_next_write(const uint8_t *have, const uint8_t *want, unsigned int len, unsigned int *first_start, enum write_granularity gran, bool coalesce);
 int write_flash(struct flashctx *flash, const uint8_t *buf, unsigned int start, unsigned int len);
 dieselect_func_t *lookup_dieselect_func_ptr(const struct flashchip *chip);
 

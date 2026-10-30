@@ -162,7 +162,7 @@ static int ezp_probe(struct flashctx *flash)
 	flash->chip->feature_bits = eeprom ? data->chip->feature_bits & (FEATURE_NO_ERASE | FEATURE_ERASED_ZERO) : 0;
 	if (eeprom && data->chip->probe == NO_PROBE_FUNC)
 		flash->chip->tested.probe = NA;
-	/* Batch changed bytes into pages to avoid repeated whole-image verification. */
+	/* Retain erase semantics; the opaque master separately coalesces write transactions. */
 	flash->chip->gran = eeprom ? WRITE_GRAN_1BYTE_IMPLICIT_ERASE : WRITE_GRAN_256BYTES;
 	flash->chip->block_erasers[0].eraseblocks[0].size = data->chip->total_size * KiB;
 	flash->chip->block_erasers[0].eraseblocks[0].count = 1;
@@ -247,6 +247,8 @@ static int ezp_write(struct flashctx *flash, const uint8_t *buf, unsigned int st
 	     offset < start + len; offset += data->block_size) {
 		uint8_t block[1024];
 		uint8_t handshake;
+		if (!memcmp(expected + offset, actual + offset, data->block_size))
+			continue;
 		if (ezp_command(data, 0x13, offset, EZP_TIMEOUT))
 			goto failed;
 		for (unsigned int pos = 0; pos < data->block_size; pos += sizeof(block)) {
@@ -338,6 +340,7 @@ static int ezp_erase(struct flashctx *flash, unsigned int start, unsigned int le
 }
 
 static const struct opaque_master ezp_master = {
+	.coalesce_write = true,
 	.probe = ezp_probe,
 	.read = ezp_read,
 	.write = ezp_write,

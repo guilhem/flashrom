@@ -591,6 +591,7 @@ int main(int argc, char *argv[])
 		cmocka_unit_test(ezp_xpro_array_completion_test),
 		cmocka_unit_test(ezp_xpro_array_transfer_error_test),
 		cmocka_unit_test(ezp_xpro_array_public_api_test),
+		cmocka_unit_test(ezp_xpro_sparse_image_test),
 		cmocka_unit_test(ezp_xpro_eeprom_policy_test),
 		cmocka_unit_test(ezp_xpro_eeprom_ranges_test),
 		cmocka_unit_test(ezp_xpro_eeprom_transfer_error_test),
